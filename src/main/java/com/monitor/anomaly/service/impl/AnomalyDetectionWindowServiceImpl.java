@@ -254,18 +254,18 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
             return createNormalReport(LocalDate.now(), "未提供数据点");
         }
         
-        // 创建临时窗口
-        DataWindow tempWindow = createTemporaryWindow(dataPoints.size());
+        // 清空当前数据窗口
+        this.dataWindow.clear();
         
         // 按日期排序并添加数据点
         dataPoints.stream()
                 .sorted(Comparator.comparing(DataPointDTO::getDate))
-                .forEach(point -> tempWindow.addDataPoint(point.getDate(), point.getValue()));
+                .forEach(point -> this.dataWindow.addDataPoint(point.getDate(), point.getValue()));
         
-        log.info("批量处理数据点: {} 个点已添加到临时窗口", tempWindow.size());
+        log.info("批量处理数据点: {} 个点已添加到数据窗口", this.dataWindow.size());
         
-        // 使用临时窗口检测
-        return detectAnomaly(tempWindow, customConfig);
+        // 使用实例的数据窗口检测
+        return detectAnomaly(this.dataWindow, customConfig);
     }
     
     @Override
