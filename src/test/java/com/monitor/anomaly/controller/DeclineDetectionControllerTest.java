@@ -21,7 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.monitor.anomaly.config.DeclineDetectionConfig;
-import com.monitor.anomaly.dto.DataPointDTO;
+import com.monitor.anomaly.model.DataPointDTO;
 import com.monitor.anomaly.model.AlertReport;
 import com.monitor.anomaly.model.AlertType;
 import com.monitor.anomaly.model.BatchDetectionRequest;

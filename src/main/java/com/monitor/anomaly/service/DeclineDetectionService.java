@@ -4,7 +4,7 @@ import java.util.Date;
 import java.util.List;
 
 import com.monitor.anomaly.config.DeclineDetectionConfig;
-import com.monitor.anomaly.dto.DataPointDTO;
+import com.monitor.anomaly.model.DataPointDTO;
 import com.monitor.anomaly.model.AlertReport;
 import com.monitor.anomaly.util.DataWindow;
 

@@ -15,7 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import com.monitor.anomaly.config.DeclineDetectionConfig;
-import com.monitor.anomaly.dto.DataPointDTO;
+import com.monitor.anomaly.model.DataPointDTO;
 import com.monitor.anomaly.model.AlertReport;
 import com.monitor.anomaly.model.AlertType;
 import com.monitor.anomaly.service.impl.DeclineDetectionServiceImpl;
@@ -503,11 +503,10 @@ public class DeclineDetectionServiceTest {
         
         // 创建一个暴跌的数据点列表
         List<DataPointDTO> dataPoints = new ArrayList<>();
-        Date today = new Date();
-        long dayInMillis = 24 * 60 * 60 * 1000L;
+        LocalDate today = LocalDate.now();
         
         for (int i = 6; i >= 1; i--) {
-            dataPoints.add(new DataPointDTO(new Date(today.getTime() - i * dayInMillis), 100.0));
+            dataPoints.add(new DataPointDTO(today.minusDays(i), 100.0));
         }
         dataPoints.add(new DataPointDTO(today, 60.0));  // 最后一天暴跌40%
         

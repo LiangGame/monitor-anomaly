@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -184,23 +185,7 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
      * 按照优先级顺序检测各类异常
      */
     private AlertReport detectAnomaliesByPriority(DataWindow dataWindow, double[] values) {
-        // 1. 检测暴涨（高优先级 - 权重最高）
-        AlertReport suddenSpikeReport = detectSuddenSpike(dataWindow, values);
-        log.info("暴涨检测结果: {}, 分数: {}", suddenSpikeReport.isAlert(), suddenSpikeReport.getTotalScore());
-        
-        if (suddenSpikeReport.isAlert()) {
-            return calculateTotalScore(suddenSpikeReport);
-        }
-        
-        // 2. 检测渐变上涨（中优先级 - 权重中等）
-        AlertReport gradualReport = detectGradualIncrease(dataWindow, values);
-        log.info("渐变上涨检测结果: {}, 分数: {}", gradualReport.isAlert(), gradualReport.getTotalScore());
-        
-        if (gradualReport.isAlert()) {
-            return calculateTotalScore(gradualReport);
-        }
-        
-        // 3. 检测周期性波动（低优先级 - 权重最低）
+        // 1. 首先检测周期性波动（当波动存在时优先级最高）
         boolean isPeriodic = hasPeriodicity(values);
         log.info("周期性检测结果: {}", isPeriodic);
         
@@ -211,6 +196,22 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
             );
             log.info("创建周期性报告: {}", periodicReport);
             return periodicReport; // 直接返回，无需再次计算分数
+        }
+        
+        // 2. 检测暴涨（次优先级）
+        AlertReport suddenSpikeReport = detectSuddenSpike(dataWindow, values);
+        log.info("暴涨检测结果: {}, 分数: {}", suddenSpikeReport.isAlert(), suddenSpikeReport.getTotalScore());
+        
+        if (suddenSpikeReport.isAlert()) {
+            return calculateTotalScore(suddenSpikeReport);
+        }
+        
+        // 3. 检测渐变上涨（低优先级）
+        AlertReport gradualReport = detectGradualIncrease(dataWindow, values);
+        log.info("渐变上涨检测结果: {}, 分数: {}", gradualReport.isAlert(), gradualReport.getTotalScore());
+        
+        if (gradualReport.isAlert()) {
+            return calculateTotalScore(gradualReport);
         }
         
         // 如果都没有检测到异常，返回正常结果
@@ -279,7 +280,7 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
             return createNormalReport(LocalDate.now(), "未提供数据点");
         }
         
-        // 将值转换为带日期的数据点
+        // 将值转换为带日期的数据点列表
         List<DataPointDTO> dataPoints = convertValuesToDataPoints(values);
         
         // 使用转换后的数据点进行检测
@@ -430,12 +431,15 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
         
         // 判断条件2：基于累计涨幅的判断
         boolean condition2 = totalChangePercent >= this.config.getGradualIncreaseTotalChangePercentThreshold()
-                && rSquared > 0.5; // 仍然要求一定的拟合度，避免剧烈波动被误判
+                && rSquared > 0.5 // 仍然要求一定的拟合度，避免剧烈波动被误判
+                && values.length > 1 && (values[values.length-1] > values[values.length-2]); // 确保最后一天相对前一天是上涨的
         
         // 判断条件3：基于平均日涨幅的判断（适用于间歇性上涨模式）
         boolean condition3 = upDays >= (values.length / 2)  // 至少一半天数在上涨
                 && avgDailyIncreasePercent >= this.config.getGradualIncreaseSlopeThreshold() * 100  // 平均日涨幅显著
-                && totalChangePercent >= this.config.getGradualIncreaseTotalChangePercentThreshold() / 2;  // 总涨幅不能太小
+                && totalChangePercent >= this.config.getGradualIncreaseTotalChangePercentThreshold() / 2  // 总涨幅不能太小
+                && (lastValue > firstValue * (1 + this.config.getGradualIncreaseTotalChangePercentThreshold() / 200)) // 确保最后值比初始值明显增长
+                && values.length > 1 && (values[values.length-1] > values[values.length-2]); // 确保最后一天相对前一天是上涨的
         
         log.debug("渐变上涨条件检查 - 条件1: {}, 条件2: {}, 条件3: {}", condition1, condition2, condition3);
         
@@ -509,7 +513,8 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
             // 判断是否为暴涨 - 使用或条件而不是与条件，更宽松的判断
             boolean isSuddenSpike = (percentageChange > this.config.getSuddenSpikePercentageChangeThreshold() 
                     || deviationFromMean > this.config.getSuddenSpikeStdDeviationMultiplier())
-                    && absoluteChange > this.config.getSuddenSpikeMinAbsoluteChange();
+                    && absoluteChange > this.config.getSuddenSpikeMinAbsoluteChange()
+                    && percentageChange > 0; // 确保最后一天相对于前一天是上涨状态
             
             if (isSuddenSpike) {
                 // 计算置信度 - 取百分比变化和标准差倍数的最大比例
@@ -543,25 +548,42 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
      */
     private boolean hasPeriodicity(double[] values) {
         // 数据不足时无法检测周期性
-        if (values.length < this.config.getPeriodicityMaxPeriodDays() * 2) {
-            log.debug("数据不足以检测周期性: {} < {}", values.length, this.config.getPeriodicityMaxPeriodDays() * 2);
+        if (values.length < 4) { // 降低最小数据要求，只要4个点即可开始分析
+            log.debug("数据不足以检测周期性: {} < 4", values.length);
             return false;
         }
         
-        // 如果最后一个值有大幅波动，不考虑周期性
-        if (values.length > 1) {
+        // 特殊处理末尾暴涨的情况 - 看暴涨前的数据是否有波动特征
+        if (values.length > 2) {
             double lastValue = values[values.length - 1];
             double previousValue = values[values.length - 2];
             double percentageChange = previousValue != 0 ? Math.abs((lastValue - previousValue) / previousValue * 100) : 0;
             
-            // 如果最后一天变化超过阈值的一半，优先考虑为异常而非周期性
-            if (percentageChange > this.config.getSuddenSpikePercentageChangeThreshold() / 2) {
-                log.debug("最后一天变化过大，不考虑周期性: {}%", percentageChange);
-                return false;
+            // 如果最后一天有大幅波动，检查前面的数据是否有波动特征
+            if (percentageChange > this.config.getSuddenSpikePercentageChangeThreshold() / 2 && values.length > 4) {
+                log.debug("检测到末尾可能有暴涨，分析前面的数据波动性");
+                
+                // 创建不包含最后一个点的子数组
+                double[] subValues = Arrays.copyOfRange(values, 0, values.length - 1);
+                
+                // 在子数组中检测方向变化
+                int directionChanges = countDirectionChanges(subValues);
+                log.debug("除去末尾点后，方向变化次数: {}", directionChanges);
+                
+                // 如果前面的数据有足够的波动，仍然视为周期性
+                if (directionChanges >= 2) {
+                    log.debug("尽管末尾有暴涨，但前期数据显示周期性波动特征，方向变化: {}", directionChanges);
+                    return true;
+                }
+            }
+            
+            // 如果最后一天变化过大，不作为常规周期性判断的阻碍因素
+            if (percentageChange > this.config.getSuddenSpikePercentageChangeThreshold()) {
+                log.debug("最后一天变化过大: {}%，但不排除整体波动性", percentageChange);
             }
         }
         
-        // 计算标准差 - 如果波动很小，不考虑周期性
+        // 计算标准差、变异系数
         DescriptiveStatistics stats = new DescriptiveStatistics(values);
         double stdDev = stats.getStandardDeviation();
         double mean = stats.getMean();
@@ -575,8 +597,27 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
             return false;
         }
         
-        // 计算自相关系数
-        for (int lag = 1; lag <= Math.min(this.config.getPeriodicityMaxPeriodDays(), values.length / 3); lag++) {
+        // 检测方向变化次数
+        int directionChanges = countDirectionChanges(values);
+        log.debug("方向变化次数: {}", directionChanges);
+        
+        // 如果方向变化次数足够多，可以认为是波动模式
+        if (directionChanges >= 3 && values.length <= 8) {
+            log.debug("基于方向变化检测到周期性波动，变化次数: {}", directionChanges);
+            return true;
+        }
+        
+        // 传统的自相关分析
+        double maxCorrelation = 0;
+        int bestLag = 0;
+        
+        // 计算自相关系数，但放宽周期要求
+        int maxLag = Math.min(this.config.getPeriodicityMaxPeriodDays(), values.length / 2);
+        for (int lag = 1; lag <= maxLag; lag++) {
+            if (values.length - lag < 2) {
+                continue; // 避免序列太短
+            }
+            
             double[] series1 = new double[values.length - lag];
             double[] series2 = new double[values.length - lag];
             
@@ -590,6 +631,12 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
             double correlation = StatisticsUtil.correlation(series1, series2);
             log.debug("周期 {} 天的相关系数: {}", lag, correlation);
             
+            // 记录最高相关系数
+            if (Math.abs(correlation) > Math.abs(maxCorrelation)) {
+                maxCorrelation = correlation;
+                bestLag = lag;
+            }
+            
             // 如果相关系数大于阈值，认为存在周期性
             if (Math.abs(correlation) > this.config.getPeriodicityAutocorrelationThreshold()) {
                 log.debug("检测到周期性波动，周期: {} 天, 相关系数: {}", lag, correlation);
@@ -597,8 +644,37 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
             }
         }
         
+        // 放宽判断条件 - 如果最大相关系数超过较低阈值，且方向变化次数足够多，也视为周期性
+        if (Math.abs(maxCorrelation) > 0.5 && directionChanges >= 2 && values.length >= 5) {
+            log.debug("综合判断检测到周期性波动，最佳周期: {} 天, 最大相关系数: {}, 方向变化: {}", 
+                    bestLag, maxCorrelation, directionChanges);
+            return true;
+        }
+        
         log.debug("未检测到周期性波动");
         return false;
+    }
+
+    /**
+     * 计算数据方向变化次数
+     */
+    private int countDirectionChanges(double[] values) {
+        if (values.length < 3) {
+            return 0;
+        }
+        
+        int directionChanges = 0;
+        boolean increasing = values[1] > values[0];
+        
+        for (int i = 2; i < values.length; i++) {
+            boolean currentIncreasing = values[i] > values[i-1];
+            if (currentIncreasing != increasing) {
+                directionChanges++;
+                increasing = currentIncreasing;
+            }
+        }
+        
+        return directionChanges;
     }
 
     /**
@@ -630,33 +706,18 @@ public class AnomalyDetectionWindowServiceImpl implements AnomalyDetectionWindow
         // 使用相关系数的绝对值作为置信度
         double confidenceScore = Math.abs(maxCorrelation);
         
+        // 构建描述信息
         StringBuilder description = new StringBuilder();
-        description.append(String.format("检测到周期性波动，周期约为%d天，相关系数为%.2f", 
+        description.append(String.format("检测到周期性波动，周期约为%d天，相关系数为%.2f，不属于异常", 
                 bestPeriod, maxCorrelation));
         
-        // 计算基本分数
-        double baseScore = confidenceScore;
-        
-        // 计算总分
-        double totalScore = baseScore * this.config.getScorePeriodicWeight();
-        
-        // 确定严重性级别
-        SeverityLevel severityLevel;
-        if (totalScore >= this.config.getScoreCriticalThreshold()) {
-            severityLevel = SeverityLevel.CRITICAL;
-        } else if (totalScore >= this.config.getScoreWarningThreshold()) {
-            severityLevel = SeverityLevel.WARNING;
-        } else {
-            severityLevel = SeverityLevel.NORMAL;
-        }
-        
-        // 返回已经完全配置好的报告，避免后续处理修改类型
+        // 周期性波动不触发告警，且被视为正常情况
         return AlertReport.builder()
                 .date(date)
-                .isAlert(true)
-                .alertType(AlertType.ABNORMAL_VOLATILITY)
-                .totalScore(totalScore)
-                .severityLevel(severityLevel)
+                .isAlert(false)
+                .alertType(AlertType.NO_ISSUE)
+                .totalScore(0.0)
+                .severityLevel(SeverityLevel.NORMAL)
                 .description(description.toString())
                 .build();
     }

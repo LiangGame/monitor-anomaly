@@ -1,9 +1,9 @@
 package com.monitor.anomaly.service.impl;
 
 import com.monitor.anomaly.config.DeclineDetectionConfig;
-import com.monitor.anomaly.dto.DataPointDTO;
 import com.monitor.anomaly.model.AlertReport;
 import com.monitor.anomaly.model.AlertType;
+import com.monitor.anomaly.model.DataPointDTO;
 import com.monitor.anomaly.service.DeclineDetectionService;
 import com.monitor.anomaly.util.DataWindow;
 import com.monitor.anomaly.util.StatisticsUtil;
@@ -460,17 +460,15 @@ public class DeclineDetectionServiceImpl implements DeclineDetectionService {
     
     @Override
     public AlertReport addPointAndDetect(DataWindow dataWindow, Date date, double value, DeclineDetectionConfig customConfig) {
-        if (dataWindow == null || date == null) {
-            return createNormalReport("unknown");
+        if (dataWindow == null) {
+            dataWindow = this.dataWindow;
         }
         
-        // 转换日期为LocalDate
-        LocalDate localDate = date.toInstant().atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate localDate = date.toInstant()
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate();
         
-        // 添加数据点
         dataWindow.addDataPoint(localDate, value);
-        
-        // 执行异常检测
         return detectDecline(dataWindow, customConfig);
     }
     
@@ -494,7 +492,7 @@ public class DeclineDetectionServiceImpl implements DeclineDetectionService {
     
     @Override
     public AlertReport detectDeclineWithValues(List<Double> values) {
-        return detectWithValues(values);
+        return detectWithValues(values, null);
     }
     
     @Override
@@ -520,9 +518,7 @@ public class DeclineDetectionServiceImpl implements DeclineDetectionService {
         dataPoints.stream()
                 .sorted(Comparator.comparing(DataPointDTO::getDate))
                 .forEach(point -> {
-                    LocalDate date = point.getDate().toInstant()
-                            .atZone(ZoneId.systemDefault())
-                            .toLocalDate();
+                    LocalDate date = point.getDate(); // Using model DataPointDTO with LocalDate
                     this.dataWindow.addDataPoint(date, point.getValue());
                 });
         
@@ -537,17 +533,17 @@ public class DeclineDetectionServiceImpl implements DeclineDetectionService {
      */
     private List<DataPointDTO> convertValuesToDataPoints(List<Double> values) {
         List<DataPointDTO> dataPoints = new ArrayList<>();
-        Date today = new Date();
-        long dayInMillis = 24 * 60 * 60 * 1000L;
+        LocalDate today = LocalDate.now();
         
         for (int i = 0; i < values.size(); i++) {
             // 计算日期（最新值对应最近日期）
-            Date date = new Date(today.getTime() - (values.size() - 1 - i) * dayInMillis);
+            LocalDate date = today.minusDays(values.size() - 1 - i);
             Double value = values.get(i);
             
             // 跳过null值
             if (value != null) {
-                dataPoints.add(new DataPointDTO(date, value));
+                double primitiveValue = value;
+                dataPoints.add(new DataPointDTO(date, primitiveValue));
             }
         }
         
