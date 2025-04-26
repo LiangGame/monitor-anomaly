@@ -6,6 +6,12 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.time.format.DateTimeFormatter;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.serializer.SerializeConfig;
+import com.alibaba.fastjson.serializer.SerializerFeature;
+import com.alibaba.fastjson.serializer.SimpleDateFormatSerializer;
 
 /**
  * 滑动窗口数据结构，用于存储和处理固定时间窗口内的指标数据
@@ -476,6 +482,65 @@ public class DataWindow {
         @Override
         public int compareTo(DataPoint other) {
             return this.date.compareTo(other.date);
+        }
+    }
+    
+    /**
+     * 将数据窗口转换为JSONArray字符串
+     * 使用FastJSON序列化，包含所有数据点详细信息
+     * 
+     * @return JSONArray格式的字符串
+     */
+    public String toJsonArray() {
+        if (dataPoints.isEmpty()) {
+            return "[]";
+        }
+        return JSON.toJSONString(dataPoints, SerializerFeature.WriteMapNullValue);
+    }
+    
+    /**
+     * 将数据窗口转换为JSONArray字符串，只包含日期和值
+     * 使用FastJSON，适用于需要简化输出的场景
+     * 
+     * @return 简化的JSONArray格式字符串
+     */
+    public String toSimpleJsonArray() {
+        if (dataPoints.isEmpty()) {
+            return "[]";
+        }
+        
+        JSONArray jsonArray = new JSONArray();
+        for (DataPoint point : dataPoints) {
+            // 创建只包含日期和值的简化对象
+            SimplifiedDataPoint simplePoint = new SimplifiedDataPoint(
+                point.getDate().format(DateTimeFormatter.ISO_LOCAL_DATE),
+                point.getValue()
+            );
+            jsonArray.add(simplePoint);
+        }
+        
+        return jsonArray.toJSONString();
+    }
+    
+    /**
+     * 简化的数据点类，仅包含日期和值
+     * 用于生成简化版JSON
+     */
+    private static class SimplifiedDataPoint {
+        private String date;
+        private double value;
+        
+        public SimplifiedDataPoint(String date, double value) {
+            this.date = date;
+            this.value = value;
+        }
+        
+        public String getDate() {
+            return date;
+        }
+        
+        public double getValue() {
+            return value;
         }
     }
 } 
