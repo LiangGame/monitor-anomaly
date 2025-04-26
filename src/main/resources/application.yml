@@ -1,0 +1,44 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: anomaly-detection
+
+anomaly:
+  detection:
+    gradual-increase:
+      # 线性回归斜率阈值，大于该值视为渐变上涨（日均涨25%）
+      slope-threshold: 0.25
+      # 要求的最小决定系数R²，衡量线性模型拟合程度
+      min-r-squared: 0.6
+      # 最小连续上升天数
+      min-consecutive-increases: 3
+      # 累计涨幅阈值（%），总体涨幅超过该值才会触发警报
+      total-change-percent-threshold: 100.0
+    
+    sudden-spike:
+      # 相对于前一天的突增百分比阈值
+      percentage-change-threshold: 100.0
+      # 相对于历史平均值的标准差倍数，超过视为暴涨
+      std-deviation-multiplier: 3.0
+      # 最小绝对变化值，避免基数小时误判
+      min-absolute-change: 10.0
+    
+    periodicity:
+      # 自相关系数阈值，超过该值视为具有周期性
+      autocorrelation-threshold: 0.7
+      # 检测的最大周期天数
+      max-period-days: 7
+      
+    score:
+      # 暴涨权重 - 高优先级
+      sudden-spike-weight: 10.0
+      # 渐变上涨权重 - 中优先级
+      gradual-increase-weight: 5.0
+      # 周期性波动权重 - 低优先级（通常不算异常）
+      periodic-weight: 1.0
+      # 异常分数阈值，超过该值视为严重异常
+      critical-threshold: 7.5
+      # 异常分数中等阈值，超过该值视为中等异常
+      warning-threshold: 5.0 
